@@ -11,7 +11,14 @@ String path_substringCommand = "&"          , path_equalCommand = "=";
 
 int pathDetails[3]; // Array to store path parameters (angle, distance, speed)
 
-MPU6050 mpu(Wire); // MPU6050 sensor object for reading IMU data
+const int MPU = 0x68; // MPU6050 I2C address
+float AccX, AccY, AccZ;
+float GyroX, GyroY, GyroZ;
+float accAngleX, accAngleY, gyroAngleX, gyroAngleY, gyroAngleZ;
+float roll, pitch, yaw;
+float AccErrorX, AccErrorY, GyroErrorX, GyroErrorY, GyroErrorZ;
+float elapsedTime, currentTime, previousTime;
+int c = 0;
 
 // Motor control pins
 #define motorL1   7
@@ -41,15 +48,16 @@ MPU6050 mpu(Wire); // MPU6050 sensor object for reading IMU data
 
 int steps = 0;  // Tracks the number of steps (encoder counts)
 int distance = 0;  // Distance traveled based on encoder steps
-float yaw;  // Variable to hold the yaw angle from the MPU6050
 
 void setup() {
   Serial.begin(buadRate); // Initialize serial communication at a baud rate of 9600
-  Wire.begin(); // Initialize I2C communication
-  mpu.begin(); // Initialize the MPU6050 sensor
-  mpu.calcOffsets(); // Calibrate MPU6050 sensor
-  mpu.update(); // Update sensor readings
-  yaw = mpu.getAngleZ(); // Initialize yaw angle
+  Wire.begin();                      // Initialize comunication
+  Wire.beginTransmission(MPU);       // Start communication with MPU6050 // MPU=0x68
+  Wire.write(0x6B);                  // Talk to the register 6B
+  Wire.write(0x00);                  // Make reset - place a 0 into the 6B register
+  Wire.endTransmission(true);        //end the transmission
+  calculate_IMU_error();
+  update_mpu_readings();
   pinMode(sensor, INPUT); // Set sensor pin as input
   pinMode(motorR1, OUTPUT); // Set motor control pins as outputs
   pinMode(motorR2, OUTPUT);
@@ -61,8 +69,7 @@ void setup() {
 }
 
 void loop() {
-  mpu.update(); // Continuously update MPU6050 sensor readings
-  yaw = mpu.getAngleZ(); // Get the current yaw angle
+  update_mpu_readings(); // Continuously update MPU6050 sensor readings
   sendData("false", yaw, distance, 0); // Send current data over serial
   if (Serial.available()) { 
     // Check if data is available on the serial port
@@ -80,7 +87,7 @@ void loop() {
  * @param speed - The speed at which the car should move.
  */
 void SetCarPath(signed int initial_angle, int path_distance, char speed) {
-  mpu.update(); // Update sensor readings
+  update_mpu_readings();
   turnCar(initial_angle, speedTurn); // Turn the car to the specified angle
   moveForward(); // Start moving forward
   distance = 0; // Reset distance traveled
@@ -97,8 +104,7 @@ void SetCarPath(signed int initial_angle, int path_distance, char speed) {
       distance = (steps / 90.0) * 100; // Convert steps to distance
       while (digitalRead(sensor)); // Wait for the sensor to clear
     }
-    mpu.update(); // Update sensor readings
-    yaw = mpu.getAngleZ(); // Update yaw angle
+    update_mpu_readings();
   }
   sendData("true", yaw, distance, speed); // Send final status
   instantStop(); // Stop the car
@@ -138,7 +144,7 @@ void sendData(String carIsMoving, signed int angle, int dis, int speed) {
  */
 void performSequence(String str) {
   Serial.print("executeSequence:success=true&status=inProgress\r");
-  mpu.update(); // Update sensor readings
+  update_mpu_readings(); // Update sensor readings
   
   // Execute specific movement based on the command
   if (str == "moveSquare") {
@@ -160,7 +166,7 @@ void performSequence(String str) {
  * @param str - The command string received via serial communication.
  */
 void checkCommand(String str) {
-  mpu.update(); // Update sensor readings
+  update_mpu_readings(); // Update sensor readings
 
   // Check if the command is a sequence command
   if (str.indexOf(sequenceCommand) > -1) {
@@ -175,7 +181,7 @@ void checkCommand(String str) {
 
     // Parse the parameters from the command string
     while (str.length() > 0) {
-      mpu.update();
+      update_mpu_readings();
       param = str.substring(0, str.indexOf(path_equalCommand)); // Get parameter name
       str.remove(0, str.indexOf(path_equalCommand) + 1);
 
@@ -259,9 +265,7 @@ void moveRectangle(float length, float width, char speed) {
  */
 void turnCar(signed int ang, int speed) {
   while (1) {
-    mpu.update(); // Update sensor readings
-    yaw = mpu.getAngleZ(); // Get the current yaw angle
-
+    update_mpu_readings();
     if (yaw > (ang + 1)) { // If the car needs to turn right
       moveRight();         // Turn the car to the right
       applyCarSpeed(speed); // Apply the turning speed
@@ -338,4 +342,86 @@ void moveLeft() {
   digitalWrite(motorR2, HIGH); 
   digitalWrite(motorL1, HIGH); 
   digitalWrite(motorL2, LOW);
+}
+
+
+void calculate_IMU_error() {
+  // We can call this funtion in the setup section to calculate the accelerometer and gyro data error. From here we will get the error values used in the above equations printed on the Serial Monitor.
+  // Note that we should place the IMU flat in order to get the proper values, so that we then can the correct values
+  // Read accelerometer values 200 times
+  while (c < 200) {
+    Wire.beginTransmission(MPU);
+    Wire.write(0x3B);
+    Wire.endTransmission(false);
+    Wire.requestFrom(MPU, 6, true);
+    AccX = (Wire.read() << 8 | Wire.read()) / 16384.0 ;
+    AccY = (Wire.read() << 8 | Wire.read()) / 16384.0 ;
+    AccZ = (Wire.read() << 8 | Wire.read()) / 16384.0 ;
+    // Sum all readings
+    AccErrorX = AccErrorX + ((atan((AccY) / sqrt(pow((AccX), 2) + pow((AccZ), 2))) * 180 / PI));
+    AccErrorY = AccErrorY + ((atan(-1 * (AccX) / sqrt(pow((AccY), 2) + pow((AccZ), 2))) * 180 / PI));
+    c++;
+  }
+  //Divide the sum by 200 to get the error value
+  AccErrorX = AccErrorX / 200;
+  AccErrorY = AccErrorY / 200;
+  c = 0;
+  // Read gyro values 200 times
+  while (c < 200) {
+    Wire.beginTransmission(MPU);
+    Wire.write(0x43);
+    Wire.endTransmission(false);
+    Wire.requestFrom(MPU, 6, true);
+    GyroX = Wire.read() << 8 | Wire.read();
+    GyroY = Wire.read() << 8 | Wire.read();
+    GyroZ = Wire.read() << 8 | Wire.read();
+    // Sum all readings
+    GyroErrorX = GyroErrorX + (GyroX / 131.0);
+    GyroErrorY = GyroErrorY + (GyroY / 131.0);
+    GyroErrorZ = GyroErrorZ + (GyroZ / 131.0);
+    c++;
+  }
+  //Divide the sum by 200 to get the error value
+  GyroErrorX = GyroErrorX / 200;
+  GyroErrorY = GyroErrorY / 200;
+  GyroErrorZ = GyroErrorZ / 200;
+}
+
+
+void update_mpu_readings()
+{
+  // === Read acceleromter data === //
+  Wire.beginTransmission(MPU);
+  Wire.write(0x3B); // Start with register 0x3B (ACCEL_XOUT_H)
+  Wire.endTransmission(false);
+  Wire.requestFrom(MPU, 6, true); // Read 6 registers total, each axis value is stored in 2 registers
+  //For a range of +-2g, we need to divide the raw values by 16384, according to the datasheet
+  AccX = (Wire.read() << 8 | Wire.read()) / 16384.0; // X-axis value
+  AccY = (Wire.read() << 8 | Wire.read()) / 16384.0; // Y-axis value
+  AccZ = (Wire.read() << 8 | Wire.read()) / 16384.0; // Z-axis value
+  // Calculating Roll and Pitch from the accelerometer data
+  accAngleX = (atan(AccY / sqrt(pow(AccX, 2) + pow(AccZ, 2))) * 180 / PI) - AccErrorX; // AccErrorX ~(-5.25) See the calculate_IMU_error()custom function for more details
+  accAngleY = (atan(-1 * AccX / sqrt(pow(AccY, 2) + pow(AccZ, 2))) * 180 / PI) - AccErrorY; // AccErrorY ~(2.66)
+  // === Read gyroscope data === //
+  previousTime = currentTime;        // Previous time is stored before the actual time read
+  currentTime = millis();            // Current time actual time read
+  elapsedTime = (currentTime - previousTime) / 1000; // Divide by 1000 to get seconds
+  Wire.beginTransmission(MPU);
+  Wire.write(0x43); // Gyro data first register address 0x43
+  Wire.endTransmission(false);
+  Wire.requestFrom(MPU, 6, true); // Read 4 registers total, each axis value is stored in 2 registers
+  GyroX = (Wire.read() << 8 | Wire.read()) / 131.0; // For a 250deg/s range we have to divide first the raw value by 131.0, according to the datasheet
+  GyroY = (Wire.read() << 8 | Wire.read()) / 131.0;
+  GyroZ = (Wire.read() << 8 | Wire.read()) / 131.0;
+  // Correct the outputs with the calculated error values
+  GyroX = GyroX - GyroErrorX; // GyroErrorX ~(0.21)
+  GyroY = GyroY - GyroErrorY; // GyroErrorY ~(0.11)
+  GyroZ = GyroZ - GyroErrorZ; // GyroErrorZ ~ (-0.75)
+  // Currently the raw values are in degrees per seconds, deg/s, so we need to multiply by sendonds (s) to get the angle in degrees
+  gyroAngleX = gyroAngleX + GyroX * elapsedTime; // deg/s * s = deg
+  gyroAngleY = gyroAngleY + GyroY * elapsedTime;
+  yaw =  yaw + GyroZ * elapsedTime;
+  // Complementary filter - combine acceleromter and gyro angle values
+  roll = 0.96 * gyroAngleX + 0.04 * accAngleX;
+  pitch = 0.96 * gyroAngleY + 0.04 * accAngleY;
 }
