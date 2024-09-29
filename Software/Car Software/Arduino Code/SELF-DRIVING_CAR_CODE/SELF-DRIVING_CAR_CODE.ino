@@ -1,5 +1,4 @@
 #include <Wire.h>
-#include <MPU6050_light.h>
 
 #define buadRate 9600
 
@@ -57,7 +56,6 @@ void setup() {
   Wire.write(0x00);                  // Make reset - place a 0 into the 6B register
   Wire.endTransmission(true);        //end the transmission
   calculate_IMU_error();
-  update_mpu_readings();
   pinMode(sensor, INPUT); // Set sensor pin as input
   pinMode(motorR1, OUTPUT); // Set motor control pins as outputs
   pinMode(motorR2, OUTPUT);
@@ -346,82 +344,104 @@ void moveLeft() {
 
 
 void calculate_IMU_error() {
-  // We can call this funtion in the setup section to calculate the accelerometer and gyro data error. From here we will get the error values used in the above equations printed on the Serial Monitor.
-  // Note that we should place the IMU flat in order to get the proper values, so that we then can the correct values
-  // Read accelerometer values 200 times
+  // === Calculate accelerometer error === //
+  // Loop 200 times to accumulate accelerometer readings and calculate the error average
   while (c < 200) {
-    Wire.beginTransmission(MPU);
-    Wire.write(0x3B);
-    Wire.endTransmission(false);
-    Wire.requestFrom(MPU, 6, true);
-    AccX = (Wire.read() << 8 | Wire.read()) / 16384.0 ;
-    AccY = (Wire.read() << 8 | Wire.read()) / 16384.0 ;
-    AccZ = (Wire.read() << 8 | Wire.read()) / 16384.0 ;
-    // Sum all readings
-    AccErrorX = AccErrorX + ((atan((AccY) / sqrt(pow((AccX), 2) + pow((AccZ), 2))) * 180 / PI));
-    AccErrorY = AccErrorY + ((atan(-1 * (AccX) / sqrt(pow((AccY), 2) + pow((AccZ), 2))) * 180 / PI));
-    c++;
+    Wire.beginTransmission(MPU);          // Start communication with the MPU-6050
+    Wire.write(0x3B);                     // Set the register pointer to 0x3B (ACCEL_XOUT_H) to start reading accelerometer data
+    Wire.endTransmission(false);          // End the transmission but keep I2C active for next request
+    Wire.requestFrom(MPU, 6, true);       // Request 6 bytes of accelerometer data (2 bytes each for X, Y, Z axes)
+
+    // Read and process accelerometer data for X, Y, Z axes
+    AccX = (Wire.read() << 8 | Wire.read()) / 16384.0;  // Combine two bytes for X-axis, divide by 16384 to convert to 'g'
+    AccY = (Wire.read() << 8 | Wire.read()) / 16384.0;  // Combine two bytes for Y-axis, divide by 16384 to convert to 'g'
+    AccZ = (Wire.read() << 8 | Wire.read()) / 16384.0;  // Combine two bytes for Z-axis, divide by 16384 to convert to 'g'
+
+    // Accumulate the calculated roll and pitch angles based on accelerometer data
+    AccErrorX = AccErrorX + (atan(AccY / sqrt(pow(AccX, 2) + pow(AccZ, 2))) * 180 / PI); // Accumulate the roll error
+    AccErrorY = AccErrorY + (atan(-1 * AccX / sqrt(pow(AccY, 2) + pow(AccZ, 2))) * 180 / PI); // Accumulate the pitch error
+
+    c++; // Increment the loop counter
   }
-  //Divide the sum by 200 to get the error value
-  AccErrorX = AccErrorX / 200;
-  AccErrorY = AccErrorY / 200;
-  c = 0;
-  // Read gyro values 200 times
+
+  // Calculate the average accelerometer error over 200 readings
+  AccErrorX = AccErrorX / 200;  // Average roll error
+  AccErrorY = AccErrorY / 200;  // Average pitch error
+
+  c = 0; // Reset the counter for the next loop
+
+  // === Calculate gyroscope error === //
+  // Loop 200 times to accumulate gyroscope readings and calculate the error average
   while (c < 200) {
-    Wire.beginTransmission(MPU);
-    Wire.write(0x43);
-    Wire.endTransmission(false);
-    Wire.requestFrom(MPU, 6, true);
-    GyroX = Wire.read() << 8 | Wire.read();
-    GyroY = Wire.read() << 8 | Wire.read();
-    GyroZ = Wire.read() << 8 | Wire.read();
-    // Sum all readings
-    GyroErrorX = GyroErrorX + (GyroX / 131.0);
-    GyroErrorY = GyroErrorY + (GyroY / 131.0);
-    GyroErrorZ = GyroErrorZ + (GyroZ / 131.0);
-    c++;
+    Wire.beginTransmission(MPU);          // Start communication with the MPU-6050
+    Wire.write(0x43);                     // Set the register pointer to 0x43 (GYRO_XOUT_H) to start reading gyroscope data
+    Wire.endTransmission(false);          // End the transmission but keep I2C active for next request
+    Wire.requestFrom(MPU, 6, true);       // Request 6 bytes of gyroscope data (2 bytes each for X, Y, Z axes)
+
+    // Read and process gyroscope data for X, Y, Z axes
+    GyroX = Wire.read() << 8 | Wire.read();  // Combine two bytes for X-axis gyroscope data
+    GyroY = Wire.read() << 8 | Wire.read();  // Combine two bytes for Y-axis gyroscope data
+    GyroZ = Wire.read() << 8 | Wire.read();  // Combine two bytes for Z-axis gyroscope data
+
+    // Accumulate the angular velocity (in degrees per second) for each axis
+    GyroErrorX = GyroErrorX + (GyroX / 131.0); // Accumulate the error for X-axis
+    GyroErrorY = GyroErrorY + (GyroY / 131.0); // Accumulate the error for Y-axis
+    GyroErrorZ = GyroErrorZ + (GyroZ / 131.0); // Accumulate the error for Z-axis
+
+    c++; // Increment the loop counter
   }
-  //Divide the sum by 200 to get the error value
-  GyroErrorX = GyroErrorX / 200;
-  GyroErrorY = GyroErrorY / 200;
-  GyroErrorZ = GyroErrorZ / 200;
+
+  // Calculate the average gyroscope error over 200 readings
+  GyroErrorX = GyroErrorX / 200;  // Average X-axis error
+  GyroErrorY = GyroErrorY / 200;  // Average Y-axis error
+  GyroErrorZ = GyroErrorZ / 200;  // Average Z-axis error
 }
 
 
 void update_mpu_readings()
 {
-  // === Read acceleromter data === //
+  // Start communication with the MPU, and request accelerometer data from register 0x3B
   Wire.beginTransmission(MPU);
-  Wire.write(0x3B); // Start with register 0x3B (ACCEL_XOUT_H)
+  Wire.write(0x3B);
   Wire.endTransmission(false);
-  Wire.requestFrom(MPU, 6, true); // Read 6 registers total, each axis value is stored in 2 registers
-  //For a range of +-2g, we need to divide the raw values by 16384, according to the datasheet
-  AccX = (Wire.read() << 8 | Wire.read()) / 16384.0; // X-axis value
-  AccY = (Wire.read() << 8 | Wire.read()) / 16384.0; // Y-axis value
-  AccZ = (Wire.read() << 8 | Wire.read()) / 16384.0; // Z-axis value
-  // Calculating Roll and Pitch from the accelerometer data
-  accAngleX = (atan(AccY / sqrt(pow(AccX, 2) + pow(AccZ, 2))) * 180 / PI) - AccErrorX; // AccErrorX ~(-5.25) See the calculate_IMU_error()custom function for more details
-  accAngleY = (atan(-1 * AccX / sqrt(pow(AccY, 2) + pow(AccZ, 2))) * 180 / PI) - AccErrorY; // AccErrorY ~(2.66)
-  // === Read gyroscope data === //
-  previousTime = currentTime;        // Previous time is stored before the actual time read
-  currentTime = millis();            // Current time actual time read
-  elapsedTime = (currentTime - previousTime) / 1000; // Divide by 1000 to get seconds
+  Wire.requestFrom(MPU, 6, true);  // Request 6 bytes (2 bytes for each axis: X, Y, Z)
+
+  // Read and convert accelerometer data to 'g' values by dividing by 16384
+  AccX = (Wire.read() << 8 | Wire.read()) / 16384.0;
+  AccY = (Wire.read() << 8 | Wire.read()) / 16384.0;
+  AccZ = (Wire.read() << 8 | Wire.read()) / 16384.0;
+
+  // Calculate roll and pitch from accelerometer data using trigonometric functions
+  accAngleX = (atan(AccY / sqrt(pow(AccX, 2) + pow(AccZ, 2))) * 180 / PI) - AccErrorX;
+  accAngleY = (atan(-1 * AccX / sqrt(pow(AccY, 2) + pow(AccZ, 2))) * 180 / PI) - AccErrorY;
+
+  // Store the previous time, get the current time, and calculate elapsed time in seconds
+  previousTime = currentTime;
+  currentTime = millis();
+  elapsedTime = (currentTime - previousTime) / 1000.0;
+
+  // Start communication with the MPU, and request gyroscope data from register 0x43
   Wire.beginTransmission(MPU);
-  Wire.write(0x43); // Gyro data first register address 0x43
+  Wire.write(0x43);
   Wire.endTransmission(false);
-  Wire.requestFrom(MPU, 6, true); // Read 4 registers total, each axis value is stored in 2 registers
-  GyroX = (Wire.read() << 8 | Wire.read()) / 131.0; // For a 250deg/s range we have to divide first the raw value by 131.0, according to the datasheet
+  Wire.requestFrom(MPU, 6, true);  // Request 6 bytes (2 bytes for each axis: X, Y, Z)
+
+  // Read and convert gyroscope data to degrees per second by dividing by 131
+  GyroX = (Wire.read() << 8 | Wire.read()) / 131.0;
   GyroY = (Wire.read() << 8 | Wire.read()) / 131.0;
   GyroZ = (Wire.read() << 8 | Wire.read()) / 131.0;
-  // Correct the outputs with the calculated error values
-  GyroX = GyroX - GyroErrorX; // GyroErrorX ~(0.21)
-  GyroY = GyroY - GyroErrorY; // GyroErrorY ~(0.11)
-  GyroZ = GyroZ - GyroErrorZ; // GyroErrorZ ~ (-0.75)
-  // Currently the raw values are in degrees per seconds, deg/s, so we need to multiply by sendonds (s) to get the angle in degrees
-  gyroAngleX = gyroAngleX + GyroX * elapsedTime; // deg/s * s = deg
+
+  // Adjust the gyroscope values by subtracting the calibration errors
+  GyroX = GyroX - GyroErrorX;
+  GyroY = GyroY - GyroErrorY;
+  GyroZ = GyroZ - GyroErrorZ;
+
+  // Calculate angles by integrating the gyroscope data over time (deg/s * time = deg)
+  gyroAngleX = gyroAngleX + GyroX * elapsedTime;
   gyroAngleY = gyroAngleY + GyroY * elapsedTime;
-  yaw =  yaw + GyroZ * elapsedTime;
-  // Complementary filter - combine acceleromter and gyro angle values
+  yaw = yaw + GyroZ * elapsedTime;
+
+  // Use a complementary filter to combine accelerometer and gyroscope data for roll and pitch
   roll = 0.96 * gyroAngleX + 0.04 * accAngleX;
   pitch = 0.96 * gyroAngleY + 0.04 * accAngleY;
 }
