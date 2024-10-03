@@ -44,7 +44,7 @@ end
 
 % Step 4: Plot the car's path
 subplot(313)
-plot(x_coords, y_coords, '-o');  % Line plot with markers
+plot(x_coords, y_coords,'linewidth',2);  % Line plot with markers
 xlabel('X Position (m)');
 ylabel('Y Position (m)');
 title('Car Path Based on Yaw Angle and Distance');
