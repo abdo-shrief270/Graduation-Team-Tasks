@@ -21,3 +21,12 @@ CREATE TABLE
         created_at DATETIME DEFAULT now (),
         updated_at DATETIME DEFAULT now (),
     );
+
+CREATE TABLE
+    video_streams (
+        filename VARCHAR(255) NOT NULL,
+        url VARCHAR(255) NOT NULL,
+        duration_in_millis INT NOT NULL,
+        created_at DATETIME DEFAULT now (),
+        updated_at DATETIME DEFAULT now (),
+    );
