@@ -1,5 +1,4 @@
 #include <Wire.h>
-#include <MPU6050_light.h>
 
 #define buadRate 9600
 
@@ -11,7 +10,14 @@ String path_substringCommand = "&"          , path_equalCommand = "=";
 
 int pathDetails[3]; // Array to store path parameters (angle, distance, speed)
 
-MPU6050 mpu(Wire); // MPU6050 sensor object for reading IMU data
+const int MPU = 0x68; // MPU6050 I2C address
+float AccX, AccY, AccZ;
+float GyroX, GyroY, GyroZ;
+float accAngleX, accAngleY, gyroAngleX, gyroAngleY, gyroAngleZ;
+float roll, pitch, yaw;
+float AccErrorX, AccErrorY, GyroErrorX, GyroErrorY, GyroErrorZ;
+float elapsedTime, currentTime, previousTime;
+int c = 0;
 
 // Motor control pins
 #define motorL1   7
@@ -41,15 +47,15 @@ MPU6050 mpu(Wire); // MPU6050 sensor object for reading IMU data
 
 int steps = 0;  // Tracks the number of steps (encoder counts)
 int distance = 0;  // Distance traveled based on encoder steps
-float yaw;  // Variable to hold the yaw angle from the MPU6050
 
 void setup() {
   Serial.begin(buadRate); // Initialize serial communication at a baud rate of 9600
-  Wire.begin(); // Initialize I2C communication
-  mpu.begin(); // Initialize the MPU6050 sensor
-  mpu.calcOffsets(); // Calibrate MPU6050 sensor
-  mpu.update(); // Update sensor readings
-  yaw = mpu.getAngleZ(); // Initialize yaw angle
+  Wire.begin();                      // Initialize comunication
+  Wire.beginTransmission(MPU);       // Start communication with MPU6050 // MPU=0x68
+  Wire.write(0x6B);                  // Talk to the register 6B
+  Wire.write(0x00);                  // Make reset - place a 0 into the 6B register
+  Wire.endTransmission(true);        //end the transmission
+  calculate_IMU_error();
   pinMode(sensor, INPUT); // Set sensor pin as input
   pinMode(motorR1, OUTPUT); // Set motor control pins as outputs
   pinMode(motorR2, OUTPUT);
@@ -61,8 +67,7 @@ void setup() {
 }
 
 void loop() {
-  mpu.update(); // Continuously update MPU6050 sensor readings
-  yaw = mpu.getAngleZ(); // Get the current yaw angle
+  update_mpu_readings(); // Continuously update MPU6050 sensor readings
   sendData("false", yaw, distance, 0); // Send current data over serial
   if (Serial.available()) { 
     // Check if data is available on the serial port
@@ -80,7 +85,7 @@ void loop() {
  * @param speed - The speed at which the car should move.
  */
 void SetCarPath(signed int initial_angle, int path_distance, char speed) {
-  mpu.update(); // Update sensor readings
+  update_mpu_readings();
   turnCar(initial_angle, speedTurn); // Turn the car to the specified angle
   moveForward(); // Start moving forward
   distance = 0; // Reset distance traveled
@@ -97,8 +102,7 @@ void SetCarPath(signed int initial_angle, int path_distance, char speed) {
       distance = (steps / 90.0) * 100; // Convert steps to distance
       while (digitalRead(sensor)); // Wait for the sensor to clear
     }
-    mpu.update(); // Update sensor readings
-    yaw = mpu.getAngleZ(); // Update yaw angle
+    update_mpu_readings();
   }
   sendData("true", yaw, distance, speed); // Send final status
   instantStop(); // Stop the car
@@ -138,7 +142,7 @@ void sendData(String carIsMoving, signed int angle, int dis, int speed) {
  */
 void performSequence(String str) {
   Serial.print("executeSequence:success=true&status=inProgress\r");
-  mpu.update(); // Update sensor readings
+  update_mpu_readings(); // Update sensor readings
   
   // Execute specific movement based on the command
   if (str == "moveSquare") {
@@ -160,7 +164,7 @@ void performSequence(String str) {
  * @param str - The command string received via serial communication.
  */
 void checkCommand(String str) {
-  mpu.update(); // Update sensor readings
+  update_mpu_readings(); // Update sensor readings
 
   // Check if the command is a sequence command
   if (str.indexOf(sequenceCommand) > -1) {
@@ -175,7 +179,7 @@ void checkCommand(String str) {
 
     // Parse the parameters from the command string
     while (str.length() > 0) {
-      mpu.update();
+      update_mpu_readings();
       param = str.substring(0, str.indexOf(path_equalCommand)); // Get parameter name
       str.remove(0, str.indexOf(path_equalCommand) + 1);
 
@@ -259,9 +263,7 @@ void moveRectangle(float length, float width, char speed) {
  */
 void turnCar(signed int ang, int speed) {
   while (1) {
-    mpu.update(); // Update sensor readings
-    yaw = mpu.getAngleZ(); // Get the current yaw angle
-
+    update_mpu_readings();
     if (yaw > (ang + 1)) { // If the car needs to turn right
       moveRight();         // Turn the car to the right
       applyCarSpeed(speed); // Apply the turning speed
@@ -338,4 +340,108 @@ void moveLeft() {
   digitalWrite(motorR2, HIGH); 
   digitalWrite(motorL1, HIGH); 
   digitalWrite(motorL2, LOW);
+}
+
+
+void calculate_IMU_error() {
+  // === Calculate accelerometer error === //
+  // Loop 200 times to accumulate accelerometer readings and calculate the error average
+  while (c < 200) {
+    Wire.beginTransmission(MPU);          // Start communication with the MPU-6050
+    Wire.write(0x3B);                     // Set the register pointer to 0x3B (ACCEL_XOUT_H) to start reading accelerometer data
+    Wire.endTransmission(false);          // End the transmission but keep I2C active for next request
+    Wire.requestFrom(MPU, 6, true);       // Request 6 bytes of accelerometer data (2 bytes each for X, Y, Z axes)
+
+    // Read and process accelerometer data for X, Y, Z axes
+    AccX = (Wire.read() << 8 | Wire.read()) / 16384.0;  // Combine two bytes for X-axis, divide by 16384 to convert to 'g'
+    AccY = (Wire.read() << 8 | Wire.read()) / 16384.0;  // Combine two bytes for Y-axis, divide by 16384 to convert to 'g'
+    AccZ = (Wire.read() << 8 | Wire.read()) / 16384.0;  // Combine two bytes for Z-axis, divide by 16384 to convert to 'g'
+
+    // Accumulate the calculated roll and pitch angles based on accelerometer data
+    AccErrorX = AccErrorX + (atan(AccY / sqrt(pow(AccX, 2) + pow(AccZ, 2))) * 180 / PI); // Accumulate the roll error
+    AccErrorY = AccErrorY + (atan(-1 * AccX / sqrt(pow(AccY, 2) + pow(AccZ, 2))) * 180 / PI); // Accumulate the pitch error
+
+    c++; // Increment the loop counter
+  }
+
+  // Calculate the average accelerometer error over 200 readings
+  AccErrorX = AccErrorX / 200;  // Average roll error
+  AccErrorY = AccErrorY / 200;  // Average pitch error
+
+  c = 0; // Reset the counter for the next loop
+
+  // === Calculate gyroscope error === //
+  // Loop 200 times to accumulate gyroscope readings and calculate the error average
+  while (c < 200) {
+    Wire.beginTransmission(MPU);          // Start communication with the MPU-6050
+    Wire.write(0x43);                     // Set the register pointer to 0x43 (GYRO_XOUT_H) to start reading gyroscope data
+    Wire.endTransmission(false);          // End the transmission but keep I2C active for next request
+    Wire.requestFrom(MPU, 6, true);       // Request 6 bytes of gyroscope data (2 bytes each for X, Y, Z axes)
+
+    // Read and process gyroscope data for X, Y, Z axes
+    GyroX = Wire.read() << 8 | Wire.read();  // Combine two bytes for X-axis gyroscope data
+    GyroY = Wire.read() << 8 | Wire.read();  // Combine two bytes for Y-axis gyroscope data
+    GyroZ = Wire.read() << 8 | Wire.read();  // Combine two bytes for Z-axis gyroscope data
+
+    // Accumulate the angular velocity (in degrees per second) for each axis
+    GyroErrorX = GyroErrorX + (GyroX / 131.0); // Accumulate the error for X-axis
+    GyroErrorY = GyroErrorY + (GyroY / 131.0); // Accumulate the error for Y-axis
+    GyroErrorZ = GyroErrorZ + (GyroZ / 131.0); // Accumulate the error for Z-axis
+
+    c++; // Increment the loop counter
+  }
+
+  // Calculate the average gyroscope error over 200 readings
+  GyroErrorX = GyroErrorX / 200;  // Average X-axis error
+  GyroErrorY = GyroErrorY / 200;  // Average Y-axis error
+  GyroErrorZ = GyroErrorZ / 200;  // Average Z-axis error
+}
+
+
+void update_mpu_readings()
+{
+  // Start communication with the MPU, and request accelerometer data from register 0x3B
+  Wire.beginTransmission(MPU);
+  Wire.write(0x3B);
+  Wire.endTransmission(false);
+  Wire.requestFrom(MPU, 6, true);  // Request 6 bytes (2 bytes for each axis: X, Y, Z)
+
+  // Read and convert accelerometer data to 'g' values by dividing by 16384
+  AccX = (Wire.read() << 8 | Wire.read()) / 16384.0;
+  AccY = (Wire.read() << 8 | Wire.read()) / 16384.0;
+  AccZ = (Wire.read() << 8 | Wire.read()) / 16384.0;
+
+  // Calculate roll and pitch from accelerometer data using trigonometric functions
+  accAngleX = (atan(AccY / sqrt(pow(AccX, 2) + pow(AccZ, 2))) * 180 / PI) - AccErrorX;
+  accAngleY = (atan(-1 * AccX / sqrt(pow(AccY, 2) + pow(AccZ, 2))) * 180 / PI) - AccErrorY;
+
+  // Store the previous time, get the current time, and calculate elapsed time in seconds
+  previousTime = currentTime;
+  currentTime = millis();
+  elapsedTime = (currentTime - previousTime) / 1000.0;
+
+  // Start communication with the MPU, and request gyroscope data from register 0x43
+  Wire.beginTransmission(MPU);
+  Wire.write(0x43);
+  Wire.endTransmission(false);
+  Wire.requestFrom(MPU, 6, true);  // Request 6 bytes (2 bytes for each axis: X, Y, Z)
+
+  // Read and convert gyroscope data to degrees per second by dividing by 131
+  GyroX = (Wire.read() << 8 | Wire.read()) / 131.0;
+  GyroY = (Wire.read() << 8 | Wire.read()) / 131.0;
+  GyroZ = (Wire.read() << 8 | Wire.read()) / 131.0;
+
+  // Adjust the gyroscope values by subtracting the calibration errors
+  GyroX = GyroX - GyroErrorX;
+  GyroY = GyroY - GyroErrorY;
+  GyroZ = GyroZ - GyroErrorZ;
+
+  // Calculate angles by integrating the gyroscope data over time (deg/s * time = deg)
+  gyroAngleX = gyroAngleX + GyroX * elapsedTime;
+  gyroAngleY = gyroAngleY + GyroY * elapsedTime;
+  yaw = yaw + GyroZ * elapsedTime;
+
+  // Use a complementary filter to combine accelerometer and gyroscope data for roll and pitch
+  roll = 0.96 * gyroAngleX + 0.04 * accAngleX;
+  pitch = 0.96 * gyroAngleY + 0.04 * accAngleY;
 }
