@@ -1,0 +1,1 @@
+export { vehicleHistorySchema } from "./vehicleHistorySchema";
