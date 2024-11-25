@@ -1,7 +1,8 @@
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
-import { vehicleHistoryRoutes } from "@/routes";
+import cookieParser from "cookie-parser";
+import { authRoutes, vehicleHistoryRoutes } from "@/routes";
 import { errorHandler, GlobalError } from "@/middlewares";
 
 const app = express();
@@ -16,13 +17,16 @@ app.use(
     origin: process.env.FRONTEND_ORIGIN || "http://localhost:5173",
     methods: ["GET", "POST", "PUT", "DELETE"],
     allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: true,
   })
 );
 app.use(express.json());
+app.use(cookieParser());
 app.use("/api/v1", vehicleHistoryRoutes);
+app.use("/api/v1", authRoutes);
 
 app.get("/bing", (req, res) => {
-  res.status(200).send({
+  res.status(200).json({
     status: "success",
     message: "bong",
   });

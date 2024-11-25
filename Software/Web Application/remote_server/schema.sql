@@ -1,10 +1,12 @@
 CREATE TABLE
     IF NOT EXISTS users (
-        id VARCHAR(26) NOT NULL,
+        id PRIMARY KEY VARCHAR(26) NOT NULL,
         first_name VARCHAR(50) NOT NULL,
         last_name VARCHAR(50) NOT NULL,
         email VARCHAR(255) NOT NULL UNIQUE,
         password VARCHAR(255) NOT NULL,
+        is_verified TINYINT DEFAULT 0,
+        verification_token VARCHAR(26),
         last_login DATETIME,
         created_at DATETIME DEFAULT now (),
         updated_at DATETIME DEFAULT now (),

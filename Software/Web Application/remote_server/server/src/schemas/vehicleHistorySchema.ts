@@ -1,13 +1,8 @@
 import z from "zod";
 
 export const vehicleHistorySchema = z.object({
-  id: z.string({ required_error: "هذا الحقل مطلوب" }).min(2, "هذا الحقل مطلوب"),
-  latitude: z
-    .string({ required_error: "هذا الحقل مطلوب" })
-    .min(2, "هذا الحقل مطلوب"),
-  longitude: z
-    .string({ required_error: "هذا الحقل مطلوب" })
-    .min(2, "هذا الحقل مطلوب"),
+  latitude: z.number({ required_error: "هذا الحقل مطلوب" }),
+  longitude: z.number({ required_error: "هذا الحقل مطلوب" }),
   person_inside_id: z.nullable(
     z.string({ required_error: "هذا الحقل مطلوب" }).min(2, "هذا الحقل مطلوب")
   ),
