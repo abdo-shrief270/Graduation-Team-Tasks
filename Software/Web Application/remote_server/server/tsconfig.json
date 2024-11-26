@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    /* Base Options: */ "esModuleInterop": true,
+    "skipLibCheck": true,
+    "verbatimModuleSyntax": true,
+    "allowJs": true,
+    "resolveJsonModule": true,
+    "moduleDetection": "force",
+    /* Strictness */
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    /* If NOT transpiling with TypeScript: */
+    "moduleResolution": "Bundler",
+    "module": "ESNext",
+    "noEmit": true,
+    /* If your code doesn't run in the DOM: */
+    "lib": ["es2022"],
+    "target": "ES2021",
+    "outDir": "./dist",
+    "rootDir": "src",
+    "allowSyntheticDefaultImports": true,
+    "baseUrl": "./src", // Helps with path aliasing if needed
+    "paths": {
+      "@/*": ["./*"] // Simple path mapping (this part may depend on your setup)
+    }
+  },
+  "include": ["src/**/*.ts"], // Ensure that TypeScript picks up all your files in src
+  "exclude": ["node_modules", "dist"]
+}
